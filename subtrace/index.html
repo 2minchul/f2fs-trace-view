@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <title>Zones</title>
+  <style>
+      canvas {
+          border: 1px solid #000;
+      }
+
+      .container {
+          display: flex;
+      }
+
+      .column {
+          flex: 1;
+      }
+
+      .left-align {
+          text-align: end;
+      }
+  </style>
+  <!-- Load d3.js -->
+  <script src="https://d3js.org/d3.v7.js"></script>
+</head>
+<body style="background-color: #f3f3f3">
+
+
+<!-- Create a div where the graph will take place -->
+<div class="container">
+  <div class="column">
+    <div>Blocks of Zone 1</div>
+    <canvas id="chartCanvas"></canvas>
+  </div>
+  <div class="column">
+    <div id="zones" class="left-align"></div>
+  </div>
+</div>
+
+
+<script>
+    // 캔버스 크기와 셀 크기
+    const canvasWidth = 512;
+    const canvasHeight = 1024;
+    const cellSize = 1;
+
+    // 캔버스 생성
+    const canvas = d3.select("#chartCanvas")
+        .attr("width", canvasWidth * cellSize)
+        .attr("height", canvasHeight * cellSize)
+        .node();
+
+    const context = canvas.getContext("2d");
+
+    function generateRandomRow() {
+        return Array.from({length: canvasWidth}, (_) => Number(Math.random() < 0.04));
+    }
+
+    function drawChart(row, y) {
+        // 데이터 바인딩
+        row.forEach((d, i) => {
+            const xPos = i * cellSize;
+            const yPos = y * cellSize;
+            context.fillStyle = d === 1 ? "green" : "white";
+            context.fillRect(xPos, yPos, cellSize, cellSize);
+        });
+    }
+
+    // data 생성
+    const ndata = [];
+    for (let i = 0; i < canvasHeight; i++) {
+        const row = generateRandomRow();
+        ndata.push(row);
+    }
+
+    // 데이터 바인딩
+    for (let i = 0; i < canvasHeight; i++) {
+        drawChart(ndata[i], i);
+    }
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function progress(col) {
+        await sleep(Math.random() * 10000)
+        for (let n = 0; n <= canvasWidth; n++) {
+            let row = Array.from({length: n}, (_) => 1);
+            row = row.concat(Array.from({length: canvasWidth - n}, (_) => 0));
+            drawChart(row, col);
+            await sleep(0.1)
+        }
+    }
+
+    // for (let i = 0; i < canvasHeight; i++) {
+    //     if (Math.random() > 0.09) {
+    //         continue;
+    //     }
+    //     progress(i);
+    // }
+
+    async function handleStreamData() {
+        const response = await fetch('zone/1'); // Replace with your streaming endpoint URL
+        const reader = response.body.getReader();
+
+        let buf = [];
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) {
+                break;
+            }
+            buf.push(...value);
+            while (true) {
+                const pos = buf.findIndex((d) => d === 10)
+                if (pos === -1) break;
+                const part = buf.slice(0, pos)
+                const chunk = String.fromCharCode(...part)
+                const parsed = JSON.parse(chunk);
+                const t = parsed[0]
+                const i = parsed[1]
+                const row = parsed[2]
+                const ping = Date.now() - t
+                console.log(`received ${i}, ping: ${ping}ms`)
+                drawChart(row, i);
+                buf = buf.slice(pos + 1)
+            }
+        }
+        // Stream ended
+    }
+
+    handleStreamData();
+
+
+</script>
+
+
+<script>
+    // set the dimensions and margins of the graph
+    const margin = {top: 30, right: 25, bottom: 30, left: 40}
+    const width = 450 - margin.left - margin.right
+    const height = 800 - margin.top - margin.bottom
+
+    const svg = d3.select("#zones")
+        .append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform", `translate(${margin.left}, ${margin.top})`);
+
+
+    const xLength = 15;
+    const yLength = 61;
+    const size = 905
+    const xVars = Array.from({length: xLength}, (_, i) => i);
+    const yVars = Array.from({length: yLength}, (_, i) => i * xLength);
+    yVars.sort((a, b) => a - b)
+
+    // Build X scales and axis:
+    const x = d3.scaleBand()
+        .domain(xVars)
+        .range([0, width])
+        .padding(0.05);
+    svg.append("g")
+        .style("font-size", 15)
+        .attr("transform", `translate(0, ${height})`)
+        .call(d3.axisBottom(x).tickSize(0))
+        .select(".domain").remove()
+
+    // Build Y scales and axis:
+    const y = d3.scaleBand()
+        .domain(yVars)
+        .range([0, height])
+        .padding(0.05);
+    svg.append("g")
+        .style("font-size", 15)
+        .call(d3.axisLeft(y).tickSize(0))
+        .select(".domain").remove()
+
+    // Build color scale
+    const myColor = d3.scaleSequential()
+        .interpolator(d3.interpolateInferno)
+        .domain([1, 100])
+
+    // create a tooltip
+    const tooltip = d3.select("#zones")
+        .append("div")
+        .style("opacity", 0)
+        .attr("class", "tooltip")
+        .style("position", "absolute")
+        .style("z-index", "10")
+        .style("background-color", "white")
+        .style("border", "solid")
+        .style("border-width", "2px")
+        .style("border-radius", "5px")
+        .style("padding", "5px")
+
+
+    // Three function that change the tooltip when user hover / move / leave a cell
+    const mouseover = function (event, d) {
+        if (size <= d) {
+            return
+        }
+        tooltip
+            .style("opacity", 1)
+        d3.select(this)
+            .style("stroke", "black")
+            .style("opacity", 1)
+    }
+    const mousemove = function (event, d) {
+        tooltip
+            .html("zone: " + d)
+            .style("top", (event.y + 5) + "px")
+            .style("left", (event.x + 30) + "px")
+    }
+    const mouseleave = function (event, d) {
+        tooltip
+            .style("opacity", 0)
+        d3.select(this)
+            .style("stroke", "none")
+            .style("opacity", 0.8)
+    }
+
+    const data = Array.from({length: xLength * yLength}, (_, i) => i);
+
+    // add the squares
+    svg.selectAll()
+        .data(data, function (v, i) {
+            return i;
+        })
+        .join("rect")
+        .attr("x", function (v, i) {
+            return x(xVars[Math.floor(i % (data.length / yVars.length))])
+        })
+        .attr("y", function (v, i) {
+            return y(yVars[Math.floor(i / (data.length / yVars.length))])
+        })
+        .attr("width", x.bandwidth())
+        .attr("height", y.bandwidth())
+        .style("fill", function (v, i) {
+            if (size <= i) {
+                return "white"
+            }
+            return Math.random() < 0.99 ? "black" : "yellow"
+            // return myColor(d.value)
+        })
+        .style("stroke-width", 4)
+        .style("stroke", "none")
+        .style("opacity", 0.8)
+        .on("mouseover", mouseover)
+        .on("mousemove", mousemove)
+        .on("mouseleave", mouseleave)
+
+
+    // Add title to graph
+    svg.append("text")
+        .attr("x", 0)
+        .attr("y", -10)
+        .attr("text-anchor", "left")
+        .style("font-size", "22px")
+        .text("Zones");
+</script>
+
+</body>
+
