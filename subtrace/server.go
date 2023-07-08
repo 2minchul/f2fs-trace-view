@@ -2,11 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -58,9 +63,22 @@ func streamDataHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/zone/", streamDataHandler)
+	server := &http.Server{
+		Addr: ":8080",
+	}
+
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		<-c
+		_ = server.Shutdown(ctx)
+	}()
+
 	fmt.Printf("======== Running on http://0.0.0.0:8080 ========\n")
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
+	err := server.ListenAndServe()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		panic(err)
 	}
 }
